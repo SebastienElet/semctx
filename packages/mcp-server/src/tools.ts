@@ -1,4 +1,4 @@
-import { TaskModeSchema } from "@semantic-context/core";
+import { TaskModeSchema, attachSuppressedError } from "@semantic-context/core";
 import type { TaskFrame, ContextPack, TaskFrameInput, TaskMode } from "@semantic-context/core";
 import { loadConfig } from "@semantic-context/repository-store";
 import type { ReadonlyRepositoryStore, SqliteRepositoryStore } from "@semantic-context/repository-store";
@@ -82,12 +82,15 @@ export async function prepareTaskTool(root: string, input: { task: string; mode?
     store.close();
     return { taskFrame, contextPack };
   } catch (error) {
+    let cleanupFailure: unknown;
     try {
       store.close();
-    } catch {
-      // Preserve the operation failure; close() still releases the handle before reporting cleanup failure.
+    } catch (closeError) {
+      cleanupFailure = closeError;
     }
-    throw error;
+    throw cleanupFailure === undefined
+      ? error
+      : attachSuppressedError(error, cleanupFailure);
   }
 }
 

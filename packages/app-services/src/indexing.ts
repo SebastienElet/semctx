@@ -1,4 +1,4 @@
-import { SemctxError, type Claim, type SemctxConfig } from "@semantic-context/core";
+import { SemctxError, attachSuppressedError, type Claim, type SemctxConfig } from "@semantic-context/core";
 import { buildClaims, GraphIndex, parseObservedDiffHunks } from "@semantic-context/context-engine";
 import { loadConfig, openStore, SCHEMA_VERSION } from "@semantic-context/repository-store";
 import { SealedAttestationIndexV1Schema, type ControlFreshnessSeal } from "@semantic-context/control-model";
@@ -305,11 +305,14 @@ export function indexRepository(root: string, indexedAt: string): RepositoryInde
         cause: error.message,
       })
       : error;
+    let cleanupFailure: unknown;
     try {
       store.close();
-    } catch {
-      // Preserve the indexing failure; close() still releases the handle before reporting cleanup failure.
+    } catch (closeError) {
+      cleanupFailure = closeError;
     }
-    throw operationError;
+    throw cleanupFailure === undefined
+      ? operationError
+      : attachSuppressedError(operationError, cleanupFailure);
   }
 }
