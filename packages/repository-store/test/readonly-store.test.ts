@@ -113,10 +113,10 @@ describe("SqliteRepositoryReader", () => {
     writer.setMeta("checkpoint_probe", "after");
 
     expect(() => writer.close()).toThrow("repository store checkpoint is busy");
+    expect(() => writer.close()).not.toThrow();
 
     blocker.exec("ROLLBACK;");
     blocker.close();
-    expect(() => writer.close()).not.toThrow();
     SqliteRepositoryStore.open(dbFile).close();
 
     const reader = SqliteRepositoryReader.openExisting(dbFile);
@@ -133,10 +133,10 @@ describe("SqliteRepositoryReader", () => {
     blocker.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run("checkpoint_probe", "concurrent");
 
     expect(() => writer.close()).toThrow("repository store checkpoint is busy");
+    expect(() => writer.close()).not.toThrow();
 
     blocker.exec("COMMIT;");
     blocker.close();
-    expect(() => writer.close()).not.toThrow();
     SqliteRepositoryStore.open(dbFile).close();
 
     const reader = SqliteRepositoryReader.openExisting(dbFile);
@@ -153,9 +153,9 @@ describe("SqliteRepositoryReader", () => {
     blocker.query("SELECT value FROM meta WHERE key = ?").get("checkpoint_probe");
 
     expect(() => writer.close()).toThrow("repository store cannot leave WAL mode");
+    expect(() => writer.close()).not.toThrow();
 
     blocker.close();
-    expect(() => writer.close()).not.toThrow();
     SqliteRepositoryStore.open(dbFile).close();
 
     const reader = SqliteRepositoryReader.openExisting(dbFile);
