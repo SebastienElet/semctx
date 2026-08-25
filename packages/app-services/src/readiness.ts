@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { SemctxError } from "@semantic-context/core";
+import { SemctxError, attachSuppressedError } from "@semantic-context/core";
 import {
   SqliteRepositoryReader,
   SqliteRepositoryStore,
@@ -40,10 +40,15 @@ export function openReadyRepositoryWriter(root: string): SqliteRepositoryStore {
   requireReadyDatabase(root);
   const store = openStore(root);
   if (!store.isIndexed()) {
-    store.close();
-    throw new SemctxError("REPO_NOT_INDEXED", `repository index is absent at ${root}; run MCP semctx_setup (confirm:true) or 'semctx setup' first`, {
+    const readinessError = new SemctxError("REPO_NOT_INDEXED", `repository index is absent at ${root}; run MCP semctx_setup (confirm:true) or 'semctx setup' first`, {
       root,
     });
+    try {
+      store.close();
+    } catch (closeError) {
+      throw attachSuppressedError(readinessError, closeError);
+    }
+    throw readinessError;
   }
   return store;
 }

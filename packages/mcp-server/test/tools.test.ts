@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prepareTaskTool, inspectTool, verifyChangeTool } from "../src/index";
 import { SAMPLE_REPO } from "@semantic-context/test-fixtures";
-import { analyzeAndBuildClaims } from "@semantic-context/app-services";
+import { SemctxError } from "@semantic-context/core";
+import type { ErrorWithSuppressed } from "@semantic-context/core";
+import { analyzeAndBuildClaims, openReadyRepositoryWriter } from "@semantic-context/app-services";
 import { dbPath, initWorkspace, openStore } from "@semantic-context/repository-store";
 
 let root: string;
@@ -91,6 +93,46 @@ describe("readiness policy", () => {
       } finally {
         rmSync(unindexed, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("preserves the unindexed readiness error when WAL cleanup is also blocked", () => {
+    const unindexed = mkdtempSync(join(tmpdir(), "semctx-mcp-unindexed-wal-"));
+    try {
+      initWorkspace(unindexed);
+      const store = openStore(unindexed);
+      store.close();
+      const database = dbPath(unindexed);
+      const writer = new Database(database);
+      writer.exec("PRAGMA journal_mode=WAL;");
+      writer.query("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)").run("readiness_probe", "before");
+      const blocker = new Database(database, { readonly: true });
+      blocker.exec("BEGIN;");
+      blocker.query("SELECT value FROM meta WHERE key = 'readiness_probe'").get();
+      writer.query("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)").run("readiness_probe", "after");
+      writer.close();
+      try {
+        let failure: unknown;
+        try {
+          openReadyRepositoryWriter(unindexed);
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toBeInstanceOf(SemctxError);
+        const readinessFailure = failure as SemctxError & ErrorWithSuppressed;
+        expect(readinessFailure.code).toBe("REPO_NOT_INDEXED");
+        expect(readinessFailure.suppressed[0]).toBeInstanceOf(SemctxError);
+        expect((readinessFailure.suppressed[0] as SemctxError).code).toBe("STORE_ERROR");
+        expect(readinessFailure.details.suppressed).toEqual([expect.objectContaining({
+          code: "STORE_ERROR",
+          message: "repository store checkpoint is busy",
+        })]);
+      } finally {
+        blocker.exec("ROLLBACK;");
+        blocker.close();
+      }
+    } finally {
+      rmSync(unindexed, { recursive: true, force: true });
     }
   });
 });
