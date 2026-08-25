@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { Database } from "bun:sqlite";
 import { cpSync, existsSync, rmSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,6 +113,50 @@ describe("semctx_prepare_task", () => {
     expect(contextPack.recommendedReads.some((r) => r.path.includes("legacy"))).toBe(false);
     for (const claim of contextPack.authoritativeClaims) {
       expect(claim.verificationStatus).not.toBe("deprecated");
+    }
+  });
+
+  it("recovers through a mutable writer after a busy WAL cleanup", async () => {
+    const recoveryRoot = mkdtempSync(join(tmpdir(), "semctx-mcp-wal-recovery-"));
+    try {
+      cpSync(SAMPLE_REPO, recoveryRoot, {
+        recursive: true,
+        filter: (src) => !src.includes(".semctx") && !src.includes("node_modules"),
+      });
+      const config = initWorkspace(recoveryRoot);
+      const store = openStore(recoveryRoot);
+      try {
+        const { analysis, claims } = analyzeAndBuildClaims(config);
+        store.saveGraph(analysis.graph, analysis.evidence);
+        store.replaceClaims(claims);
+      } finally {
+        store.close();
+      }
+
+      const database = dbPath(recoveryRoot);
+      const walSetup = new Database(database);
+      walSetup.exec("PRAGMA journal_mode=WAL;");
+      walSetup.close();
+      const blocker = new Database(database, { readonly: true });
+      blocker.exec("BEGIN;");
+      blocker.query("SELECT value FROM meta WHERE key = 'schema_version'").get();
+      try {
+        await expectFailure(
+          () => prepareTaskTool(recoveryRoot, { task: "first WAL recovery attempt" }),
+          "repository store checkpoint is busy",
+        );
+        expect(existsSync(`${database}-wal`)).toBe(true);
+      } finally {
+        blocker.exec("ROLLBACK;");
+        blocker.close();
+      }
+
+      const result = await prepareTaskTool(recoveryRoot, { task: "retry WAL recovery" });
+      expect(result.taskFrame.rawTask).toBe("retry WAL recovery");
+      expect(existsSync(`${database}-wal`)).toBe(false);
+      expect(existsSync(`${database}-shm`)).toBe(false);
+    } finally {
+      rmSync(recoveryRoot, { recursive: true, force: true });
     }
   });
 });

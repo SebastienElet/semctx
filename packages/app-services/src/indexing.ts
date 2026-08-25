@@ -279,7 +279,7 @@ export function indexRepository(root: string, indexedAt: string): RepositoryInde
         [CONTROL_INDEX_SNAPSHOT_META_KEY]: JSON.stringify(snapshot),
       },
     });
-    return {
+    const result = {
       ...indexed,
       freshnessSeal: buildControlFreshnessSeal({
         repositoryRoot,
@@ -297,14 +297,19 @@ export function indexRepository(root: string, indexedAt: string): RepositoryInde
         planeAIndexSnapshotHash: planeAIndexSnapshotHash as `sha256:${string}`,
       }),
     };
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new SemctxError("STORE_ERROR", "invalid persisted control attestation index", {
-        cause: error.message,
-      });
-    }
-    throw error;
-  } finally {
     store.close();
+    return result;
+  } catch (error) {
+    const operationError = error instanceof SyntaxError
+      ? new SemctxError("STORE_ERROR", "invalid persisted control attestation index", {
+        cause: error.message,
+      })
+      : error;
+    try {
+      store.close();
+    } catch {
+      // Preserve the indexing failure; close() still releases the handle before reporting cleanup failure.
+    }
+    throw operationError;
   }
 }
