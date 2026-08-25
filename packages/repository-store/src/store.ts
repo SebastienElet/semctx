@@ -277,24 +277,32 @@ export class SqliteRepositoryStore implements RepositoryStore {
       this.closeDatabase();
       return;
     }
-    this.db.fileControl(constants.SQLITE_FCNTL_PERSIST_WAL, 0);
-    const checkpoint = this.db.query("PRAGMA wal_checkpoint(TRUNCATE);").get() as unknown;
-    if (!isWalCheckpointRow(checkpoint)) {
-      throw new SemctxError("STORE_ERROR", "repository store checkpoint returned an invalid result", { checkpoint });
-    }
-    if (checkpoint.busy !== 0) {
-      throw new SemctxError("STORE_ERROR", "repository store checkpoint is busy", { checkpoint });
-    }
-    let journalMode: unknown;
+    let cleanupFailure: Error | undefined;
     try {
-      journalMode = this.db.query("PRAGMA journal_mode = DELETE;").get() as unknown;
+      this.db.fileControl(constants.SQLITE_FCNTL_PERSIST_WAL, 0);
+      const checkpoint = this.db.query("PRAGMA wal_checkpoint(TRUNCATE);").get() as unknown;
+      if (!isWalCheckpointRow(checkpoint)) {
+        throw new SemctxError("STORE_ERROR", "repository store checkpoint returned an invalid result", { checkpoint });
+      }
+      if (checkpoint.busy !== 0) {
+        throw new SemctxError("STORE_ERROR", "repository store checkpoint is busy", { checkpoint });
+      }
+      let journalMode: unknown;
+      try {
+        journalMode = this.db.query("PRAGMA journal_mode = DELETE;").get() as unknown;
+      } catch (cause) {
+        throw new SemctxError("STORE_ERROR", "repository store cannot leave WAL mode", { cause: String(cause) });
+      }
+      if (!isDeleteJournalModeRow(journalMode)) {
+        throw new SemctxError("STORE_ERROR", "repository store cannot leave WAL mode", { journalMode });
+      }
     } catch (cause) {
-      throw new SemctxError("STORE_ERROR", "repository store cannot leave WAL mode", { cause: String(cause) });
-    }
-    if (!isDeleteJournalModeRow(journalMode)) {
-      throw new SemctxError("STORE_ERROR", "repository store cannot leave WAL mode", { journalMode });
+      cleanupFailure = cause instanceof Error
+        ? cause
+        : new SemctxError("STORE_ERROR", "repository store cleanup failed", { cause: String(cause) });
     }
     this.closeDatabase();
+    if (cleanupFailure !== undefined) throw cleanupFailure;
   }
 
   private closeDatabase(): void {

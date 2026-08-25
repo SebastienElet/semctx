@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { SqliteRepositoryReader, SqliteRepositoryStore } from "@semantic-context/repository-store";
@@ -102,7 +102,7 @@ describe("SqliteRepositoryReader", () => {
     expect(() => writer.close()).not.toThrow();
   });
 
-  it("keeps the writer open for a checkpoint retry after a concurrent reader closes", () => {
+  it("closes a writer after a busy checkpoint and allows cleanup through a later writer", () => {
     const directory = temporaryDirectory();
     const dbFile = join(directory, "index.db");
     const writer = SqliteRepositoryStore.open(dbFile);
@@ -116,14 +116,15 @@ describe("SqliteRepositoryReader", () => {
 
     blocker.exec("ROLLBACK;");
     blocker.close();
-    writer.close();
+    expect(() => writer.close()).not.toThrow();
+    SqliteRepositoryStore.open(dbFile).close();
 
     const reader = SqliteRepositoryReader.openExisting(dbFile);
     expect(reader.getMeta("checkpoint_probe")).toBe("after");
     reader.close();
   });
 
-  it("keeps the writer open for a checkpoint retry after a concurrent writer closes", () => {
+  it("closes a writer after a concurrent write and allows cleanup through a later writer", () => {
     const directory = temporaryDirectory();
     const dbFile = join(directory, "index.db");
     const writer = SqliteRepositoryStore.open(dbFile);
@@ -135,14 +136,15 @@ describe("SqliteRepositoryReader", () => {
 
     blocker.exec("COMMIT;");
     blocker.close();
-    writer.close();
+    expect(() => writer.close()).not.toThrow();
+    SqliteRepositoryStore.open(dbFile).close();
 
     const reader = SqliteRepositoryReader.openExisting(dbFile);
     expect(reader.getMeta("checkpoint_probe")).toBe("concurrent");
     reader.close();
   });
 
-  it("keeps the writer open when an idle reader prevents leaving WAL mode", () => {
+  it("closes a writer when an idle reader blocks WAL cleanup and permits later cleanup", () => {
     const directory = temporaryDirectory();
     const dbFile = join(directory, "index.db");
     const writer = SqliteRepositoryStore.open(dbFile);
@@ -153,7 +155,8 @@ describe("SqliteRepositoryReader", () => {
     expect(() => writer.close()).toThrow("repository store cannot leave WAL mode");
 
     blocker.close();
-    writer.close();
+    expect(() => writer.close()).not.toThrow();
+    SqliteRepositoryStore.open(dbFile).close();
 
     const reader = SqliteRepositoryReader.openExisting(dbFile);
     expect(reader.getMeta("checkpoint_probe")).toBe("ready");
@@ -186,6 +189,32 @@ describe("SqliteRepositoryReader", () => {
     }
   });
 
+  it("tracks managed writers by canonical path through a filesystem alias", () => {
+    for (const reverseCloseOrder of [false, true]) {
+      const directory = temporaryDirectory();
+      const realDirectory = join(directory, "real");
+      const aliasDirectory = join(directory, "alias");
+      mkdirSync(realDirectory);
+      symlinkSync(realDirectory, aliasDirectory, process.platform === "win32" ? "junction" : "dir");
+      const dbFile = join(realDirectory, "index.db");
+      const aliasedDbFile = join(aliasDirectory, "index.db");
+      const first = SqliteRepositoryStore.open(dbFile);
+      const second = SqliteRepositoryStore.open(aliasedDbFile);
+
+      if (reverseCloseOrder) {
+        second.close();
+        first.close();
+      } else {
+        first.close();
+        second.close();
+      }
+
+      expect(existsSync(`${dbFile}-wal`)).toBe(false);
+      expect(existsSync(`${dbFile}-shm`)).toBe(false);
+      expect(() => SqliteRepositoryReader.openExisting(dbFile).close()).not.toThrow();
+    }
+  });
+
   it("does not poison later cleanup when opening a store fails", () => {
     const directory = temporaryDirectory();
     const dbFile = join(directory, "index.db");
@@ -201,7 +230,6 @@ describe("SqliteRepositoryReader", () => {
     `);
 
     expect(() => SqliteRepositoryStore.open(dbFile)).toThrow("schema version rejected");
-    Bun.gc(true);
     blocker.exec("DROP TRIGGER reject_schema_version;");
     blocker.close();
 
