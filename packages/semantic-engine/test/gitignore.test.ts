@@ -31,6 +31,32 @@ function expectIgnored(root: string, path: string, ignored: boolean): void {
 }
 
 describe("semantic gitignore integration", () => {
+  for (const projectOnly of [false, true]) {
+    it(`repairs duplicate config rules masking a missing ${projectOnly ? "project" : "broad semantic"} descendant exception`, () => {
+      const root = createRepository();
+      const rules = [
+        "*.sem",
+        ".semctx/*",
+        "!.semctx/semantic/",
+        ...(projectOnly ? [".semctx/semantic/*", "!.semctx/semantic/project/"] : []),
+        "!.semctx/config.json",
+        "!.semctx/config.json",
+      ];
+      writeFileSync(join(root, ".gitignore"), `${rules.join("\n")}\n`);
+
+      const result = ensureSemanticGitignore(root);
+
+      expectIgnored(root, ".semctx/config.json", false);
+      expectIgnored(root, projectOnly ? ".semctx/semantic/project/domain.sem" : ".semctx/semantic/requirements.sem", false);
+      expectIgnored(root, "user.sem", true);
+      expectIgnored(root, ".semctx/working/change.sem", true);
+      expect(result.action).toBe("update");
+      const content = readFileSync(join(root, ".gitignore"), "utf8");
+      expect(ensureSemanticGitignore(root).action).toBe("present");
+      expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(content);
+    });
+  }
+
   for (const reversed of [true, false]) {
     it(`repairs ${reversed ? "reversed" : "canonical"} project rules followed by a foreign authored-source exclusion`, () => {
       const root = createRepository();

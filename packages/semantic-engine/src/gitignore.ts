@@ -65,6 +65,7 @@ export function computeGitignore(existing: string | undefined): { content: strin
   const hasEffectivePolicy =
     firstManagedRule > lastForeignRule &&
     recognizedRules.length === policy.length &&
+    semanticRules.length === expectedSemanticRules.length &&
     semanticRules.every((line, index) => line === expectedSemanticRules[index]) &&
     recognizedRules.indexOf(TRACK_CONFIG) > recognizedRules.indexOf(IGNORE_CHILDREN);
   if (hasEffectivePolicy) {
