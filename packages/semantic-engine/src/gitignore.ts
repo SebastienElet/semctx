@@ -67,7 +67,7 @@ export function computeGitignore(existing: string | undefined): { content: strin
   const semanticRules = recognizedRules.filter((line) => line !== TRACK_CONFIG);
   const expectedSemanticRules = policy.filter((line) => line !== TRACK_CONFIG);
   const hasEffectivePolicy =
-    lines.every((line) => !isManagedRule(line.trim()) || line === line.trimStart()) &&
+    lines.every((line) => !isManagedRule(line.trim()) || line.replace(/\r$/, "") === line.trim()) &&
     firstManagedRule > lastForeignRule &&
     recognizedRules.length === policy.length &&
     semanticRules.length === expectedSemanticRules.length &&

@@ -32,8 +32,8 @@ function expectIgnored(root: string, path: string, ignored: boolean): void {
 
 describe("semantic gitignore integration", () => {
   for (const projectOnly of [false, true]) {
-    for (const prefix of [" ", "\t"]) {
-      it(`repairs leading whitespace in ${projectOnly ? "project" : "broad semantic"} rules`, () => {
+    for (const [prefix, suffix] of [[" ", ""], ["\t", ""], ["", "\t"], ["", "\u00a0"]]) {
+      it(`repairs literal whitespace in ${projectOnly ? "project" : "broad semantic"} rules (${JSON.stringify([prefix, suffix])})`, () => {
         const root = createRepository();
         const policy = [
           ".semctx/*",
@@ -43,7 +43,7 @@ describe("semantic gitignore integration", () => {
             : ["!.semctx/semantic/**"]),
           "!.semctx/config.json",
         ];
-        const original = `${policy.map((line) => `${prefix}${line}`).join("\n")}\n`;
+        const original = `${policy.map((line) => `${prefix}${line}${suffix}`).join("\n")}\n`;
         writeFileSync(join(root, ".gitignore"), original);
 
         expect(ensureSemanticGitignore(root, true).action).toBe("update");
