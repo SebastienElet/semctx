@@ -577,7 +577,13 @@ function objectEntries(value: unknown): Record<string, unknown>[] {
 }
 
 export function redactUrlUserInfo(value: string): string {
-  return value.replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/@]*@/g, "$1");
+  return stripControlCharacters(value).replace(
+    /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#\\\s]*)/g,
+    (_match: string, scheme: string, authority: string) => {
+      const separator = authority.lastIndexOf("@");
+      return scheme + (separator === -1 ? authority : authority.slice(separator + 1));
+    },
+  );
 }
 
 /**
@@ -721,8 +727,9 @@ function trimTrailingSlashes(value: string): string {
 
 export function normalizeGitSource(value: unknown): string {
   if (typeof value !== "string") return "";
-  const normalized = redactUrlUserInfo(value
-    .trim()
+  const trimmed = value.trim();
+  if (stripControlCharacters(trimmed) !== trimmed || /[\s\\]/.test(trimmed)) return "";
+  const normalized = redactUrlUserInfo(trimmed
     .toLowerCase()
     .replace(/^git@github\.com:/, "https://github.com/"));
   return trimTrailingSlashes(normalized).replace(/\.git$/, "");

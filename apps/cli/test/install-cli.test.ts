@@ -329,10 +329,17 @@ function installWithLockedAdd(options: FakeOptions): ReturnType<typeof fakeRunti
 
 describe("semctx install — no-brain host + repository bootstrap", () => {
   test.each([
-    ["https://user:token@github.com/hoklims/semctx", true],
-    ["https://user:token@host/hoklims/semctx", false],
-    ["https://user:token@github.com/someone/else.git", false],
-  ] as const)("status and install agree on credentialed marketplace %s", (source, matchesSemctx) => {
+    ["https://user:token@github.com/hoklims/semctx", true, "https://github.com/hoklims/semctx"],
+    ["https://user:token@host/hoklims/semctx", false, "https://host/hoklims/semctx"],
+    ["https://user:token@github.com/someone/else.git", false, "https://github.com/someone/else.git"],
+    ["https://user:token@secretSuffix@github.com/hoklims/semctx", true, "https://github.com/hoklims/semctx"],
+    ["https://user%40name:token%3Fpart%23fragment@github.com/hoklims/semctx", true, "https://github.com/hoklims/semctx"],
+    ["https://evil.invalid?@github.com/hoklims/semctx", false, "https://evil.invalid?@github.com/hoklims/semctx"],
+    ["https://evil.invalid#@github.com/hoklims/semctx", false, "https://evil.invalid#@github.com/hoklims/semctx"],
+    ["https://evil.invalid\\@github.com/hoklims/semctx", false, "https://evil.invalid\\@github.com/hoklims/semctx"],
+    ["https://user:token\n@github.com/hoklims/semctx", false, "https://github.com/hoklims/semctx"],
+    ["https://github.com/ho\nklims/semctx", false, "https://github.com/hoklims/semctx"],
+  ] as const)("status and install agree on credentialed marketplace %s", (source, matchesSemctx, displayedSource) => {
     for (const dryRun of [true, false]) {
       const runtime = fakeRuntime({
         codexMarketplaces: {
@@ -371,21 +378,30 @@ describe("semctx install — no-brain host + repository bootstrap", () => {
       expect(install.hosts.codex.status).toBe(
         matchesSemctx ? (dryRun ? "planned" : "installed") : "conflict",
       );
-      expect(status.hosts.codex.marketplace.source).toBe(source.replace("user:token@", ""));
+      expect(status.hosts.codex.marketplace.source).toBe(displayedSource);
       const output = JSON.stringify({ status, install });
       expect(output).not.toContain("user");
       expect(output).not.toContain("token");
       expect(output).not.toContain("user:token@");
+      expect(output).not.toContain("secretSuffix");
+      if (!matchesSemctx || dryRun) {
+        expect(runtime.commands.some((command) => command.some((token) =>
+          ["add", "install", "update", "upgrade", "remove", "enable"].includes(token)))).toBe(false);
+      }
     }
   });
 
-  test.each(["out", "err"] as const)("credentialed marketplace failures redact host %s", (stream) => {
-    const source = "https://user:token@github.com/hoklims/semctx";
+  test.each((["out", "err"] as const).flatMap((stream) => [
+    "https://user:token@github.com/hoklims/semctx",
+    "https://user:token@secretSuffix@github.com/hoklims/semctx",
+    "https://user%40name:token%3Fpart%23fragment@github.com/hoklims/semctx",
+    "https://user:token\nsecretSuffix@github.com/hoklims/semctx",
+  ].map((source) => [stream, source] as const)))("credentialed marketplace failures redact host %s %s", (stream, source) => {
     const runtime = fakeRuntime({
       codexMarketplaces: {
         marketplaces: [{
           name: "semctx-stable",
-          marketplaceSource: { sourceType: "git", source },
+          marketplaceSource: { sourceType: "git", source: "https://user:token@github.com/hoklims/semctx" },
           ref: "stable",
         }],
       },
@@ -407,6 +423,7 @@ describe("semctx install — no-brain host + repository bootstrap", () => {
     const output = JSON.stringify(report);
     expect(output).not.toContain("user:token@");
     expect(output).not.toContain("token");
+    expect(output).not.toContain("secretSuffix");
   });
 
   test("fixture PATH replaces a Windows-style Path key instead of creating an ambiguous duplicate", () => {
