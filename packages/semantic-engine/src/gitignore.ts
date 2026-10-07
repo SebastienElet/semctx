@@ -51,18 +51,23 @@ export function computeGitignore(existing: string | undefined): { content: strin
     (line) => line.length > 0 && !line.startsWith("#") && !isManagedRule(line),
   );
   const firstManagedRule = trimmedLines.findIndex(isManagedRule);
-  const projectOnly = recognizedRules.some(
+  const hasProjectRules = recognizedRules.some(
     (line) =>
       line === IGNORE_SEMANTIC_CHILDREN ||
       line === TRACK_PROJECT ||
       line === TRACK_PROJECT_DESCENDANTS,
   );
+  const projectOnly =
+    hasProjectRules &&
+    recognizedRules.lastIndexOf(IGNORE_SEMANTIC_CHILDREN) >=
+      recognizedRules.lastIndexOf(TRACK_SEMANTIC_DESCENDANTS);
   const policy = projectOnly
     ? PROJECT_ONLY_POLICY
     : [IGNORE_CHILDREN, TRACK_SEMANTIC, TRACK_SEMANTIC_DESCENDANTS, TRACK_CONFIG];
   const semanticRules = recognizedRules.filter((line) => line !== TRACK_CONFIG);
   const expectedSemanticRules = policy.filter((line) => line !== TRACK_CONFIG);
   const hasEffectivePolicy =
+    lines.every((line) => !isManagedRule(line.trim()) || line === line.trimStart()) &&
     firstManagedRule > lastForeignRule &&
     recognizedRules.length === policy.length &&
     semanticRules.length === expectedSemanticRules.length &&

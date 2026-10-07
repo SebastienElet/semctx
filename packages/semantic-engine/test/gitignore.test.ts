@@ -32,6 +32,65 @@ function expectIgnored(root: string, path: string, ignored: boolean): void {
 
 describe("semantic gitignore integration", () => {
   for (const projectOnly of [false, true]) {
+    for (const prefix of [" ", "\t"]) {
+      it(`repairs leading whitespace in ${projectOnly ? "project" : "broad semantic"} rules`, () => {
+        const root = createRepository();
+        const policy = [
+          ".semctx/*",
+          "!.semctx/semantic/",
+          ...(projectOnly
+            ? [".semctx/semantic/*", "!.semctx/semantic/project/", "!.semctx/semantic/project/**"]
+            : ["!.semctx/semantic/**"]),
+          "!.semctx/config.json",
+        ];
+        const original = `${policy.map((line) => `${prefix}${line}`).join("\n")}\n`;
+        writeFileSync(join(root, ".gitignore"), original);
+
+        expect(ensureSemanticGitignore(root, true).action).toBe("update");
+        expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(original);
+        expect(ensureSemanticGitignore(root).action).toBe("update");
+
+        expectIgnored(root, ".semctx/config.json", false);
+        expectIgnored(root, ".semctx/semantic/project/domain.sem", false);
+        expectIgnored(root, ".semctx/semantic/requirements.sem", projectOnly);
+        expectIgnored(root, ".semctx/semctx.db", true);
+        expectIgnored(root, ".semctx/working/change.json", true);
+        const content = readFileSync(join(root, ".gitignore"), "utf8");
+        expect(ensureSemanticGitignore(root).action).toBe("present");
+        expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(content);
+      });
+    }
+  }
+
+  for (const broadLast of [true, false]) {
+    it(`preserves the effective ${broadLast ? "broad semantic" : "project"} variant of mixed rules`, () => {
+      const root = createRepository();
+      const broad = "!.semctx/semantic/**";
+      const project = [".semctx/semantic/*", "!.semctx/semantic/project/", "!.semctx/semantic/project/**"];
+      const policy = [
+        ".semctx/*",
+        "!.semctx/semantic/",
+        ...(broadLast ? [...project, broad] : [broad, ...project]),
+        "!.semctx/config.json",
+      ];
+      writeFileSync(join(root, ".gitignore"), `${policy.join("\n")}\n`);
+      expectIgnored(root, ".semctx/semantic/requirements.sem", !broadLast);
+
+      expect(ensureSemanticGitignore(root).action).toBe("update");
+
+      expectIgnored(root, ".semctx/config.json", false);
+      expectIgnored(root, ".semctx/semantic/project/domain.sem", false);
+      expectIgnored(root, ".semctx/semantic/requirements.sem", !broadLast);
+      expectIgnored(root, ".semctx/semantic/nested/contracts.sem", !broadLast);
+      expectIgnored(root, ".semctx/semctx.db", true);
+      expectIgnored(root, ".semctx/working/change.json", true);
+      const content = readFileSync(join(root, ".gitignore"), "utf8");
+      expect(ensureSemanticGitignore(root).action).toBe("present");
+      expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(content);
+    });
+  }
+
+  for (const projectOnly of [false, true]) {
     it(`repairs duplicate config rules masking a missing ${projectOnly ? "project" : "broad semantic"} descendant exception`, () => {
       const root = createRepository();
       const rules = [
