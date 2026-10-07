@@ -576,6 +576,10 @@ function objectEntries(value: unknown): Record<string, unknown>[] {
     : [];
 }
 
+export function redactUrlUserInfo(value: string): string {
+  return value.replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/@]*@/g, "$1");
+}
+
 /**
  * Host output is echoed into a terminal and into JSON users paste into issues. Strip control
  * characters, which a hostile host could use to repaint a line and forge a verdict, and strip
@@ -585,7 +589,7 @@ function safeText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const stripped = stripControlCharacters(value).trim();
   if (stripped.length === 0) return null;
-  const withoutUserInfo = stripped.replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/@]*@/, "$1");
+  const withoutUserInfo = redactUrlUserInfo(stripped);
   return redactSecretParameters(withoutUserInfo);
 }
 
@@ -715,13 +719,12 @@ function trimTrailingSlashes(value: string): string {
   return end === value.length ? value : value.slice(0, end);
 }
 
-function normalizeGitSource(value: unknown): string {
+export function normalizeGitSource(value: unknown): string {
   if (typeof value !== "string") return "";
-  const normalized = value
+  const normalized = redactUrlUserInfo(value
     .trim()
     .toLowerCase()
-    .replace(/^git@github\.com:/, "https://github.com/")
-    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/, "$1");
+    .replace(/^git@github\.com:/, "https://github.com/"));
   return trimTrailingSlashes(normalized).replace(/\.git$/, "");
 }
 

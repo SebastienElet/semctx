@@ -4,12 +4,14 @@ import {
   codexPluginManifestIdentity,
   isCanonicalClaudeMarketplaceRecord,
   isHostInterfaceUnsupportedFailure,
+  normalizeGitSource,
   PLUGIN_DELIVERY_MAX_HOST_OUTPUT_BYTES,
   PLUGIN_DELIVERY_QUERY_TIMEOUT_MS,
   PLUGIN_DELIVERY_RELEASE_URL,
   readCodexMetadataObject,
   readCodexPluginMetadataInventory,
   readClaudePluginMetadataInventory,
+  redactUrlUserInfo,
   resolveClaudePluginHome,
   runPluginDeliveryQuery,
   sameCodexMarketplaceIdentity,
@@ -837,7 +839,7 @@ function parseSelection(args: ParsedArgs): HostSelection {
 }
 
 function compactError(result: CommandResult): string {
-  return (result.err || result.out || `command exited ${result.code}`).trim();
+  return redactUrlUserInfo((result.err || result.out || `command exited ${result.code}`).trim());
 }
 
 function runMutation(
@@ -1205,16 +1207,6 @@ function parseCodexPlugins(result: CommandResult): CodexPlugin[] | null {
   return result.code === 0 && Array.isArray(installed)
     ? objectEntries<CodexPlugin>(installed)
     : null;
-}
-
-function normalizeGitSource(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/^git@github\.com:/, "https://github.com/")
-    .replace(/\/+$/, "")
-    .replace(/\.git$/, "");
 }
 
 function isSemctxSource(value: unknown): boolean {

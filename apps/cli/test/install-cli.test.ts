@@ -33,6 +33,7 @@ import {
   type SetupExecution,
 } from "../src/commands/install";
 import {
+  pluginDeliveryStatus,
   readClaudePluginMetadataInventory,
   type CodexPluginMetadataInventory,
   type ClaudePluginMetadataInventory,
@@ -327,6 +328,87 @@ function installWithLockedAdd(options: FakeOptions): ReturnType<typeof fakeRunti
 }
 
 describe("semctx install — no-brain host + repository bootstrap", () => {
+  test.each([
+    ["https://user:token@github.com/hoklims/semctx", true],
+    ["https://user:token@host/hoklims/semctx", false],
+    ["https://user:token@github.com/someone/else.git", false],
+  ] as const)("status and install agree on credentialed marketplace %s", (source, matchesSemctx) => {
+    for (const dryRun of [true, false]) {
+      const runtime = fakeRuntime({
+        codexMarketplaces: {
+          marketplaces: [{
+            name: "semctx-stable",
+            path: join(CODEX_HOME, ".tmp", "marketplaces", "semctx-stable"),
+            marketplaceSource: { sourceType: "git", source },
+            ref: "stable",
+          }],
+        },
+        codexPluginsAfter: codexPluginsAfter({}),
+      });
+      const status = pluginDeliveryStatus({
+        repositoryRoot: CODEX_HOME,
+        version: packageJson.version,
+        hosts: ["codex"],
+      }, {
+        runQuery: (command, cwd) => runtime.run(command, cwd),
+        resolveHostHome: () => CODEX_HOME,
+        readRepositoryChannel: () => ({ commit: null, originIsSemctx: false }),
+        resolvePublicRelease: () => ({
+          authority: "absent", source: null, commit: null, version: null,
+          status: "unknown", reasons: ["PUBLIC_RELEASE_UNAVAILABLE"], bundles: null,
+        }),
+        readMarketplaceSnapshot: () => null,
+        readInstalledPayload: () => null,
+        observeSessionVersion: () => ({ status: "unknown", version: null, reason: null }),
+      });
+      const install = executeInstall(CODEX_HOME, parseArgs([
+        "install", "--host", "codex", "--skip-setup",
+        ...(dryRun ? ["--dry-run"] : []),
+      ]), runtime);
+
+      expect(status.hosts.codex.marketplace.matchesSemctx).toBe(matchesSemctx);
+      expect(install.ok).toBe(matchesSemctx);
+      expect(install.hosts.codex.status).toBe(
+        matchesSemctx ? (dryRun ? "planned" : "installed") : "conflict",
+      );
+      expect(status.hosts.codex.marketplace.source).toBe(source.replace("user:token@", ""));
+      const output = JSON.stringify({ status, install });
+      expect(output).not.toContain("user");
+      expect(output).not.toContain("token");
+      expect(output).not.toContain("user:token@");
+    }
+  });
+
+  test.each(["out", "err"] as const)("credentialed marketplace failures redact host %s", (stream) => {
+    const source = "https://user:token@github.com/hoklims/semctx";
+    const runtime = fakeRuntime({
+      codexMarketplaces: {
+        marketplaces: [{
+          name: "semctx-stable",
+          marketplaceSource: { sourceType: "git", source },
+          ref: "stable",
+        }],
+      },
+      queryOutcomes: {
+        "codex plugin marketplace upgrade semctx-stable --json": {
+          code: 1,
+          [stream]: `failed to fetch ${source}; retry ${source}`,
+        },
+      },
+    });
+    const report = executeInstall(CODEX_HOME,
+      parseArgs(["install", "--host", "codex", "--skip-setup"]), runtime);
+
+    expect(report.ok).toBe(false);
+    expect(report.hosts.codex.status).toBe("failed");
+    expect(report.hosts.codex.error).toBe(
+      "refresh Semctx Codex marketplace: failed to fetch https://github.com/hoklims/semctx; retry https://github.com/hoklims/semctx",
+    );
+    const output = JSON.stringify(report);
+    expect(output).not.toContain("user:token@");
+    expect(output).not.toContain("token");
+  });
+
   test("fixture PATH replaces a Windows-style Path key instead of creating an ambiguous duplicate", () => {
     const environment = fixtureEnvironmentWithPath("C:\\fixture-bin", {
       Path: "C:\\system-bin",
