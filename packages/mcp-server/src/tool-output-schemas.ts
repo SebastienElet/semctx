@@ -415,7 +415,15 @@ const SemanticInspectionSchema = z.object({
   linkResolutions: described(z.array(LinkResolutionSchema), "Repository-link resolutions."),
 }).strict();
 
-const HandoffSchema = mcpSchema(HandoffCapsuleSchema);
+const convertedHandoffSchema = mcpSchema(HandoffCapsuleSchema);
+const versionDescription = HandoffCapsuleSchema.shape.version.description;
+const HandoffSchema = convertedHandoffSchema instanceof z.ZodObject
+  && convertedHandoffSchema.shape.version instanceof z.ZodType
+  && versionDescription !== undefined
+  ? convertedHandoffSchema.safeExtend({
+      version: convertedHandoffSchema.shape.version.describe(versionDescription),
+    })
+  : convertedHandoffSchema;
 
 const ResumeSchema = z.union([
   HandoffSchema,
