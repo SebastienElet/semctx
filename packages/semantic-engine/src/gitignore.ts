@@ -47,13 +47,25 @@ export function computeGitignore(existing: string | undefined): { content: strin
   const trimmedLines = lines.map((line) => line.trim());
   const isManagedRule = (line: string): boolean => policyRules.has(line) || BLANKET_RE.test(line);
   const recognizedRules = trimmedLines.filter(isManagedRule);
+  const effectiveRules = lines
+    .map((line) => line.replace(/\r$/, "").replace(/ +$/, ""))
+    .filter(isManagedRule);
+  // Inactive rules cannot override a usable policy; wholly malformed policies retain their intent.
+  const variantRules = effectiveRules.some(
+    (line) =>
+      line === TRACK_SEMANTIC ||
+      line === IGNORE_SEMANTIC_CHILDREN ||
+      line === TRACK_SEMANTIC_DESCENDANTS ||
+      line === TRACK_PROJECT ||
+      line === TRACK_PROJECT_DESCENDANTS,
+  ) ? effectiveRules : recognizedRules;
   const lastForeignRule = trimmedLines.findLastIndex(
     (line) => line.length > 0 && !line.startsWith("#") && !isManagedRule(line),
   );
   const firstManagedRule = trimmedLines.findIndex(isManagedRule);
   const projectOnly =
-    recognizedRules.lastIndexOf(IGNORE_SEMANTIC_CHILDREN) >
-      recognizedRules.lastIndexOf(TRACK_SEMANTIC_DESCENDANTS);
+    variantRules.lastIndexOf(IGNORE_SEMANTIC_CHILDREN) >
+      variantRules.lastIndexOf(TRACK_SEMANTIC_DESCENDANTS);
   const policy = projectOnly
     ? PROJECT_ONLY_POLICY
     : [IGNORE_CHILDREN, TRACK_SEMANTIC, TRACK_SEMANTIC_DESCENDANTS, TRACK_CONFIG];
