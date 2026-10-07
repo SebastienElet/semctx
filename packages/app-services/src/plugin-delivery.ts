@@ -577,13 +577,36 @@ function objectEntries(value: unknown): Record<string, unknown>[] {
 }
 
 export function redactUrlUserInfo(value: string): string {
-  return stripControlCharacters(value).replace(
-    /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#\\\s]*)/g,
-    (_match: string, scheme: string, authority: string) => {
-      const separator = authority.lastIndexOf("@");
-      return scheme + (separator === -1 ? authority : authority.slice(separator + 1));
-    },
-  );
+  const cleaned = stripControlCharacters(value);
+  let output = "";
+  let cursor = 0;
+  let searchFrom = 0;
+  while (searchFrom < cleaned.length) {
+    const delimiter = cleaned.indexOf("://", searchFrom);
+    if (delimiter === -1) break;
+    let schemeStart = delimiter;
+    while (schemeStart > searchFrom && /[A-Za-z0-9+.-]/.test(cleaned.charAt(schemeStart - 1))) {
+      schemeStart--;
+    }
+    while (schemeStart < delimiter && !/[A-Za-z]/.test(cleaned.charAt(schemeStart))) schemeStart++;
+    const authorityStart = delimiter + 3;
+    if (schemeStart === delimiter) {
+      searchFrom = authorityStart;
+      continue;
+    }
+    let authorityEnd = authorityStart;
+    while (authorityEnd < cleaned.length && !/[/?#\\\s]/.test(cleaned.charAt(authorityEnd))) {
+      authorityEnd++;
+    }
+    const authority = cleaned.slice(authorityStart, authorityEnd);
+    const separator = authority.lastIndexOf("@");
+    if (separator !== -1) {
+      output += cleaned.slice(cursor, authorityStart) + authority.slice(separator + 1);
+      cursor = authorityEnd;
+    }
+    searchFrom = authorityStart;
+  }
+  return output + cleaned.slice(cursor);
 }
 
 /**

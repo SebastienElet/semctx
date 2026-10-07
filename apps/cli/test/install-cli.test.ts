@@ -328,6 +328,28 @@ function installWithLockedAdd(options: FakeOptions): ReturnType<typeof fakeRunti
 }
 
 describe("semctx install — no-brain host + repository bootstrap", () => {
+  test("redacts bounded-size host diagnostics without blocking on non-URL text", () => {
+    const moduleUrl = pathToFileURL(resolve(import.meta.dir,
+      "../../../packages/app-services/src/plugin-delivery.ts")).href;
+    const program = `
+      import { redactUrlUserInfo, PLUGIN_DELIVERY_MAX_HOST_OUTPUT_BYTES } from ${JSON.stringify(moduleUrl)};
+      const prefix = "a".repeat(PLUGIN_DELIVERY_MAX_HOST_OUTPUT_BYTES - 256);
+      const source = "https://user:token@secretSuffix@github.com/hoklims/semctx";
+      const clean = "https://github.com/hoklims/semctx";
+      const result = redactUrlUserInfo(prefix + " failed " + source + "; retry " + source);
+      if (result !== prefix + " failed " + clean + "; retry " + clean) {
+        throw new Error("bounded diagnostic redaction changed text or left credentials");
+      }
+      console.log("complete redaction");
+    `;
+    const child = Bun.spawnSync([process.execPath, "-e", program], {
+      stdout: "pipe", stderr: "pipe", timeout: 10_000, killSignal: "SIGKILL", maxBuffer: 16_384,
+    });
+    expect(child.exitCode).toBe(0);
+    expect(new TextDecoder().decode(child.stdout).trim()).toBe("complete redaction");
+    expect(new TextDecoder().decode(child.stderr)).toBe("");
+  }, 15_000);
+
   test.each([
     ["https://user:token@github.com/hoklims/semctx", true, "https://github.com/hoklims/semctx"],
     ["https://user:token@host/hoklims/semctx", false, "https://host/hoklims/semctx"],
@@ -396,7 +418,8 @@ describe("semctx install — no-brain host + repository bootstrap", () => {
     "https://user:token@secretSuffix@github.com/hoklims/semctx",
     "https://user%40name:token%3Fpart%23fragment@github.com/hoklims/semctx",
     "https://user:token\nsecretSuffix@github.com/hoklims/semctx",
-  ].map((source) => [stream, source] as const)))("credentialed marketplace failures redact host %s %s", (stream, source) => {
+  ].flatMap((source) => ["; retry ", ";"].map((separator) => [stream, source, separator] as const))))(
+    "credentialed marketplace failures redact host %s %s %s", (stream, source, separator) => {
     const runtime = fakeRuntime({
       codexMarketplaces: {
         marketplaces: [{
@@ -408,7 +431,7 @@ describe("semctx install — no-brain host + repository bootstrap", () => {
       queryOutcomes: {
         "codex plugin marketplace upgrade semctx-stable --json": {
           code: 1,
-          [stream]: `failed to fetch ${source}; retry ${source}`,
+          [stream]: `failed to fetch ${source}${separator}${source}`,
         },
       },
     });
@@ -418,7 +441,7 @@ describe("semctx install — no-brain host + repository bootstrap", () => {
     expect(report.ok).toBe(false);
     expect(report.hosts.codex.status).toBe("failed");
     expect(report.hosts.codex.error).toBe(
-      "refresh Semctx Codex marketplace: failed to fetch https://github.com/hoklims/semctx; retry https://github.com/hoklims/semctx",
+      `refresh Semctx Codex marketplace: failed to fetch https://github.com/hoklims/semctx${separator}https://github.com/hoklims/semctx`,
     );
     const output = JSON.stringify(report);
     expect(output).not.toContain("user:token@");
