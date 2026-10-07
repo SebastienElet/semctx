@@ -90,6 +90,26 @@ describe("semantic gitignore integration", () => {
     });
   }
 
+  for (const projectException of ["!.semctx/semantic/project/", "!.semctx/semantic/project/**"]) {
+    it(`keeps a broad policy broad with the redundant ${projectException} exception`, () => {
+      const root = createRepository();
+      const policy = [".semctx/*", "!.semctx/semantic/", projectException, "!.semctx/config.json"];
+      writeFileSync(join(root, ".gitignore"), `${policy.join("\n")}\n`);
+      expectIgnored(root, ".semctx/semantic/requirements.sem", false);
+
+      expect(ensureSemanticGitignore(root).action).toBe("update");
+
+      expectIgnored(root, ".semctx/config.json", false);
+      expectIgnored(root, ".semctx/semantic/project/domain.sem", false);
+      expectIgnored(root, ".semctx/semantic/requirements.sem", false);
+      expectIgnored(root, ".semctx/semantic/nested/contracts.sem", false);
+      expectIgnored(root, ".semctx/semctx.db", true);
+      const content = readFileSync(join(root, ".gitignore"), "utf8");
+      expect(ensureSemanticGitignore(root).action).toBe("present");
+      expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(content);
+    });
+  }
+
   for (const projectOnly of [false, true]) {
     it(`repairs duplicate config rules masking a missing ${projectOnly ? "project" : "broad semantic"} descendant exception`, () => {
       const root = createRepository();
