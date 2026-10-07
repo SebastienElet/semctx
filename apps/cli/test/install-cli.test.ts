@@ -328,6 +328,36 @@ function installWithLockedAdd(options: FakeOptions): ReturnType<typeof fakeRunti
 }
 
 describe("semctx install — no-brain host + repository bootstrap", () => {
+  test.each([["NUL", "\u0000"], ["bidi", "\u202e"]] as const)(
+    "raw locked-cache replacement diagnostics reject %s controls", (_name, control) => {
+      const runtime = installWithLockedAdd({
+        codexPluginsAfter: codexPluginsAfter({}),
+        failError: `failed to back up plugin cache en${control}try (os error 5)`,
+      });
+      const report = executeInstall(CODEX_HOME, parseArgs(["install", "--host", "codex", "--skip-setup"]), runtime);
+      expect(report.ok).toBe(false);
+      expect(report.hosts.codex.status).toBe("failed");
+      expect(report.hosts.codex.error).toContain("the failure is not an active-cache lock");
+      expect(runtime.payloadProbes).toEqual([]);
+      expect(runtime.deferredCacheCleanups).toEqual([]);
+    },
+  );
+
+  test.each([["NUL", "\u0000"], ["bidi", "\u202e"]] as const)(
+    "raw locked-cache removal diagnostics reject %s controls", (_name, control) => {
+      const runtime = fakeRuntime({
+        codexMarketplaces: { marketplaces: [{ name: "personal", marketplaceSource: { sourceType: "git", source: SEMCTX_SOURCE } }] },
+        codexPlugins: { installed: [{ pluginId: "semctx-control@personal", installed: true, enabled: true, version: "0.1.10" }] },
+        failCommand: "codex plugin remove semctx-control@personal --json",
+        failError: `failed to remove existing plugin cache en${control}try (os error 32)`,
+      });
+      const report = executeInstall(CODEX_HOME, parseArgs(["install", "--host", "codex", "--skip-setup"]), runtime);
+      expect(report.ok).toBe(false);
+      expect(report.hosts.codex.status).toBe("failed");
+      expect(runtime.deferredCodexCleanups).toEqual([]);
+    },
+  );
+
   test.each(["codex", "claude"] as const)("credentialed host metadata in %s versions is redacted", (host) => {
     const source = "https://user:token@secretSuffix@github.com/hoklims/semctx";
     const runtime = fakeRuntime({
@@ -402,6 +432,7 @@ describe("semctx install — no-brain host + repository bootstrap", () => {
     ["https://user:token@host/hoklims/semctx", false, "https://host/hoklims/semctx"],
     ["https://user:token@github.com/someone/else.git", false, "https://github.com/someone/else.git"],
     ["https://user:token@secretSuffix@github.com/hoklims/semctx", true, "https://github.com/hoklims/semctx"],
+    ["https://user:token@middle@secretSuffix@github.com/hoklims/semctx", true, "https://github.com/hoklims/semctx"],
     ["https://user%40name:token%3Fpart%23fragment@github.com/hoklims/semctx", true, "https://github.com/hoklims/semctx"],
     ["https://evil.invalid?@github.com/hoklims/semctx", false, "https://evil.invalid?@github.com/hoklims/semctx"],
     ["https://evil.invalid#@github.com/hoklims/semctx", false, "https://evil.invalid#@github.com/hoklims/semctx"],
@@ -463,6 +494,7 @@ describe("semctx install — no-brain host + repository bootstrap", () => {
   test.each((["out", "err"] as const).flatMap((stream) => [
     "https://user:token@github.com/hoklims/semctx",
     "https://user:token@secretSuffix@github.com/hoklims/semctx",
+    "https://user:token@middle@secretSuffix@github.com/hoklims/semctx",
     "https://user%40name:token%3Fpart%23fragment@github.com/hoklims/semctx",
     "https://user:token\nsecretSuffix@github.com/hoklims/semctx",
   ].flatMap((source) => ["; retry ", ";"].map((separator) => [stream, source, separator] as const))))(

@@ -851,8 +851,12 @@ function parseSelection(args: ParsedArgs): HostSelection {
   );
 }
 
+function rawCommandError(result: CommandResult): string {
+  return (result.err || result.out || `command exited ${result.code}`).trim();
+}
+
 function compactError(result: CommandResult): string {
-  return redactUrlUserInfo((result.err || result.out || `command exited ${result.code}`).trim());
+  return redactUrlUserInfo(rawCommandError(result));
 }
 
 function runMutation(
@@ -887,7 +891,7 @@ interface CodexCleanupOperation {
 }
 
 function isLockedCodexCacheRemoval(result: CommandResult): boolean {
-  const detail = compactError(result).toLowerCase();
+  const detail = rawCommandError(result).toLowerCase();
   return detail.includes("failed to remove existing")
     && detail.includes("cache entry")
     && detail.includes("os error 32");
@@ -959,7 +963,7 @@ function isLockedCodexCacheReplacement(
   result: CommandResult,
 ): boolean {
   if (runtime.platform !== "win32") return false;
-  const detail = compactError(result).toLowerCase();
+  const detail = rawCommandError(result).toLowerCase();
   return detail.includes("cache entry")
     && (detail.includes("failed to back up") || detail.includes("failed to remove existing"))
     && CODEX_CACHE_LOCK_PATTERN.test(detail);
