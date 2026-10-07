@@ -31,7 +31,7 @@ unknown unknown.semctx.project-analysis-boundaries
   tag: coverage
 
 evidence proof.semctx.project-config-native-checks
-  statement: On 2026-10-07, Bun 1.4.2 on macOS arm64 passed 74 existing tests across discovery-selection, config-migration, verify-analysis-scope and l6-l0-refinement-round-trip; this is bounded local execution, not the full suite or cross-platform proof.
+  statement: On 2026-10-07, after rebasing onto upstream/main e6ac3fe, Bun 1.4.0 on macOS arm64 passed 79 existing source tests across discovery-selection, config-migration, verify-analysis-scope, l6-l0-refinement-round-trip and l6-l0-public-round-trip; this is bounded checkout execution, not npm execution, the full suite or cross-platform proof.
   status: tested
   provenance: author
   appliesAtLevel: 1
@@ -39,10 +39,11 @@ evidence proof.semctx.project-config-native-checks
   file: packages/app-services/test/config-migration.test.ts
   file: packages/app-services/test/verify-analysis-scope.test.ts
   file: packages/control-engine/test/l6-l0-refinement-round-trip.test.ts
+  file: packages/app-services/test/l6-l0-public-round-trip.test.ts
   tag: test
 
 change change.semctx.project-evidence-config
-  statement: Deliberately migrate v1 to v2 recursive candidate selection, preserve strict policy, rebuild and verify the local index, and retain unresolved analysis limits.
+  statement: Deliberately migrate v1 to v2 recursive candidate selection, preserve strict policy, use the CLI source of this checkout for repository dogfooding and current evidence, rebuild and verify the local index, and retain unresolved analysis limits.
   status: partial
   provenance: author
   appliesAtLevel: 1

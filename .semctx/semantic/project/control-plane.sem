@@ -80,7 +80,7 @@ evidence proof.semctx.baseline-suite
   tag: regression-baseline
 
 evidence proof.semctx.typed-refinement-contract
-  statement: On 2026-10-07, the tracked refinement fixture tests passed under Bun 1.4.2 on macOS arm64; literal seals and caller-accepted digests exercise traversal, not live repository proof.
+  statement: On 2026-10-07, after rebasing onto upstream/main e6ac3fe, the 11 tracked refinement fixture tests passed under Bun 1.4.0 on macOS arm64 using this checkout's source; literal seals and caller-accepted digests exercise traversal, not live repository proof.
   status: tested
   provenance: author
   appliesAtLevel: 1
