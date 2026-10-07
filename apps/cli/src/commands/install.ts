@@ -810,6 +810,19 @@ function hostReport(requested: boolean): HostInstallReport {
   };
 }
 
+function redactHostReport(report: HostInstallReport): void {
+  if (typeof report.version === "string") report.version = redactUrlUserInfo(report.version);
+  if (report.error !== undefined) report.error = redactUrlUserInfo(report.error);
+  for (const step of report.steps) {
+    step.action = redactUrlUserInfo(step.action);
+    step.command = step.command.map(redactUrlUserInfo);
+    if (step.detail !== undefined) step.detail = redactUrlUserInfo(step.detail);
+  }
+  for (const deferral of report.deferrals ?? []) {
+    deferral.detail = redactUrlUserInfo(deferral.detail);
+  }
+}
+
 function selected(selection: HostSelection, host: Host): boolean {
   return selection === "auto" || selection === "all" || selection === host;
 }
@@ -1811,6 +1824,7 @@ export function executeInstall(
       }
       else installClaude(root, inspectionDryRun, runtime, report);
     }
+    for (const report of Object.values(inspected)) redactHostReport(report);
     return inspected;
   };
   const hostsAdmissible = (candidate: Record<Host, HostInstallReport>): boolean => {

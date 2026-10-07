@@ -328,6 +328,53 @@ function installWithLockedAdd(options: FakeOptions): ReturnType<typeof fakeRunti
 }
 
 describe("semctx install — no-brain host + repository bootstrap", () => {
+  test.each(["codex", "claude"] as const)("credentialed host metadata in %s versions is redacted", (host) => {
+    const source = "https://user:token@secretSuffix@github.com/hoklims/semctx";
+    const runtime = fakeRuntime({
+      claude: true,
+      codexPluginsAfter: codexPluginsAfter({ version: source }),
+      claudePluginsAfter: [{ id: "semctx@semctx-stable", scope: "user", enabled: true, version: source }],
+    });
+    const report = executeInstall(CODEX_HOME, parseArgs(["install", "--host", host, "--skip-setup"]), runtime);
+    expect(report.ok).toBe(false);
+    expect(report.hosts[host].status).toBe("failed");
+    expect(report.hosts[host].error).toContain("found vhttps://github.com/hoklims/semctx");
+    const output = JSON.stringify(report);
+    expect(output).not.toContain("user:token");
+    expect(output).not.toContain("secretSuffix");
+  });
+
+  test.each([true, false])("credentialed host metadata in detection is redacted for dry-run %s", (dryRun) => {
+    const source = "https://user:token@github.com/hoklims/semctx";
+    const runtime = fakeRuntime({
+      codexPluginsAfter: codexPluginsAfter({}),
+      queryOutcomes: { "codex --version": { code: 0, out: `codex ${source}` } },
+    });
+    const report = executeInstall(CODEX_HOME, parseArgs([
+      "install", "--host", "codex", "--skip-setup", ...(dryRun ? ["--dry-run"] : []),
+    ]), runtime);
+    expect(report.ok).toBe(true);
+    expect(report.hosts.codex.version).toBe("codex https://github.com/hoklims/semctx");
+    expect(JSON.stringify(report)).not.toContain("user:token");
+  });
+
+  test.each(["version", "snapshot"] as const)("credentialed host metadata in locked-cache %s failures is redacted", (field) => {
+    const source = "https://user:token@secretSuffix@github.com/hoklims/semctx";
+    const runtime = installWithLockedAdd({
+      codexPluginsAfter: codexPluginsAfter(field === "version"
+        ? { version: source } : { source: { path: source } }),
+    });
+    const report = executeInstall(CODEX_HOME, parseArgs(["install", "--host", "codex", "--skip-setup"]), runtime);
+    expect(report.ok).toBe(false);
+    expect(report.hosts.codex.status).toBe("failed");
+    expect(report.hosts.codex.error).toContain("https://github.com/hoklims/semctx");
+    expect(runtime.payloadProbes).not.toContain(source);
+    expect(runtime.deferredCacheCleanups).toEqual([]);
+    const output = JSON.stringify(report);
+    expect(output).not.toContain("user:token");
+    expect(output).not.toContain("secretSuffix");
+  });
+
   test("redacts bounded-size host diagnostics without blocking on non-URL text", () => {
     const moduleUrl = pathToFileURL(resolve(import.meta.dir,
       "../../../packages/app-services/src/plugin-delivery.ts")).href;
