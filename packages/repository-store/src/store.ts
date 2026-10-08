@@ -1,4 +1,4 @@
-import { RepositoryNodeSchema, RepositoryEdgeSchema, EvidenceRecordSchema, ClaimSchema, TaskFrameSchema, ContextPackSchema } from "@semantic-context/core";
+import { OwnedRepositoryNodeRowParser, OwnedRepositoryEdgeRowParser, EvidenceRecordSchema, ClaimSchema, TaskFrameSchema, ContextPackSchema } from "@semantic-context/core";
 import { constants, Database } from "bun:sqlite";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -484,7 +484,7 @@ function loadRow<T>(table: string, id: string, schema: { parse(value: unknown): 
 }
 
 function rowToNode(row: NodeRow): RepositoryNode {
-  return loadRow("nodes", row.id, RepositoryNodeSchema, () => ({
+  return loadRow("nodes", row.id, OwnedRepositoryNodeRowParser, () => ({
     id: row.id,
     kind: row.kind,
     name: row.name,
@@ -498,7 +498,7 @@ function rowToNode(row: NodeRow): RepositoryNode {
 }
 
 function rowToEdge(row: EdgeRow): RepositoryEdge {
-  return loadRow("edges", row.id, RepositoryEdgeSchema, () => ({
+  return loadRow("edges", row.id, OwnedRepositoryEdgeRowParser, () => ({
     id: row.id,
     kind: row.kind,
     from: row.from_id,

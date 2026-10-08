@@ -86,6 +86,65 @@ const corruptions = [
 ] as const;
 
 describe("SQLite load validation", () => {
+  it("preserves valid JSON extension fields without changing object prototypes", () => database((path) => {
+    const attached = JSON.parse('{"id":"evidence:extended","filePath":"a.ts","sourceKind":"code","extension":{"items":["original"]},"__proto__":"evidence-value"}') as EvidenceRecord;
+    const metadata = JSON.parse('{"value":"original","__proto__":"metadata-value"}') as RepositoryGraph["nodes"][number]["metadata"];
+    const extendedGraph: RepositoryGraph = {
+      nodes: graph.nodes.map((node) => ({ ...node, evidence: [attached], metadata })),
+      edges: graph.edges.map((edge) => ({ ...edge, evidence: [attached], metadata })),
+    };
+    const writer = SqliteRepositoryStore.open(path);
+    try { writer.saveGraph(extendedGraph, [attached]); } finally { writer.close(); }
+    for (const open of [(value: string) => SqliteRepositoryStore.open(value), (value: string) => SqliteRepositoryReader.openExisting(value)]) {
+      const reader = open(path);
+      try {
+        const loaded = reader.loadGraph();
+        expect(loaded).toEqual(extendedGraph);
+        for (const item of [...loaded.nodes, ...loaded.edges]) {
+          expect(Object.hasOwn(item.metadata, "__proto__")).toBe(true);
+          expect(Object.getPrototypeOf(item.metadata)).toBe(Object.prototype);
+          expect(Object.hasOwn(item.evidence[0]!, "__proto__")).toBe(true);
+          expect(Object.getPrototypeOf(item.evidence[0]!)).toBe(Object.prototype);
+        }
+      } finally { reader.close(); }
+    }
+  }));
+
+  it("reloads independent graph values after a returned graph is deeply modified", () => database((path) => {
+    const attached: EvidenceRecord & { extension: { items: string[] } } = {
+      id: "evidence:extended", filePath: "a.ts", sourceKind: "code", extension: { items: ["original"] },
+    };
+    const independentGraph: RepositoryGraph = {
+      nodes: graph.nodes.map((node) => ({ ...node, evidence: [attached], tags: ["original"], metadata: { value: "original" } })),
+      edges: graph.edges.map((edge) => ({ ...edge, evidence: [attached], metadata: { value: "original" } })),
+    };
+    const writer = SqliteRepositoryStore.open(path);
+    try { writer.saveGraph(independentGraph, [attached]); } finally { writer.close(); }
+    for (const open of [(value: string) => SqliteRepositoryStore.open(value), (value: string) => SqliteRepositoryReader.openExisting(value)]) {
+      const reader = open(path);
+      try {
+        const loaded = reader.loadGraph();
+        loaded.nodes[0]!.name = "modified";
+        loaded.nodes[0]!.tags[0] = "modified";
+        loaded.nodes[0]!.metadata["value"] = "modified";
+        loaded.edges[0]!.metadata["value"] = "modified";
+        const extension = Reflect.get(loaded.nodes[0]!.evidence[0]!, "extension") as { items: string[] };
+        extension.items[0] = "modified";
+        expect(reader.loadGraph()).toEqual(independentGraph);
+      } finally { reader.close(); }
+    }
+  }));
+
+  it("preserves valid node extension fields within context packs", () => database((path) => {
+    const extended = { ...graph.nodes[0]!, extension: { notes: ["original"] } };
+    const extendedPack: ContextPack = { ...pack, primaryNodes: [extended] };
+    const store = SqliteRepositoryStore.open(path);
+    try {
+      store.saveContextPack(extendedPack);
+      expect(store.getContextPack(task.id)).toEqual(extendedPack);
+    } finally { store.close(); }
+  }));
+
   it("retains attached evidence record ids through both graph readers", () => database((path) => {
     const record: EvidenceRecord = { id: "evidence:attached", filePath: "a.ts", sourceKind: "code" };
     const attachedGraph: RepositoryGraph = {
