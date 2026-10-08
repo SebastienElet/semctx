@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SemctxError, type Claim, type ContextPack, type RepositoryGraph, type TaskFrame } from "@semantic-context/core";
+import { SemctxError, type Claim, type ContextPack, type EvidenceRecord, type RepositoryGraph, type TaskFrame } from "@semantic-context/core";
 import { SqliteRepositoryReader, SqliteRepositoryStore } from "@semantic-context/repository-store";
 
 const graph: RepositoryGraph = {
@@ -86,6 +86,27 @@ const corruptions = [
 ] as const;
 
 describe("SQLite load validation", () => {
+  it("retains attached evidence record ids through both graph readers", () => database((path) => {
+    const record: EvidenceRecord = { id: "evidence:attached", filePath: "a.ts", sourceKind: "code" };
+    const attachedGraph: RepositoryGraph = {
+      ...graph,
+      nodes: graph.nodes.map((node) => ({ ...node, evidence: [record] })),
+    };
+    const store = SqliteRepositoryStore.open(path);
+    try {
+      store.saveGraph(attachedGraph, [record]);
+      expect(store.loadGraph()).toEqual(attachedGraph);
+    } finally {
+      store.close();
+    }
+    const reader = SqliteRepositoryReader.openExisting(path);
+    try {
+      expect(reader.loadGraph()).toEqual(attachedGraph);
+    } finally {
+      reader.close();
+    }
+  }));
+
   for (const [index, [table, id, column, value]] of corruptions.entries()) {
     it(`identifies ${table}.${column} corruption case ${index + 1}`, () => database((path) => {
       const db = new Database(path);

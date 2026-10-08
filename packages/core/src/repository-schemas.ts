@@ -23,7 +23,7 @@ export const EvidenceRefSchema = z.object({
   endLine: LineNumberSchema.optional(),
   sourceKind: EvidenceSourceKindSchema,
   excerpt: z.string().optional(),
-});
+}).passthrough();
 export const EvidenceRecordSchema = EvidenceRefSchema.extend({ id: z.string().min(1) }) satisfies z.ZodType<EvidenceRecord>;
 
 export const RepositoryNodeSchema = z.object({

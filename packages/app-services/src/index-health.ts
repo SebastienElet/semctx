@@ -6,6 +6,7 @@ import {
   aggregatePlaneAEvaluations,
   digestCanonical,
   evaluatePlaneA,
+  isEdgeProvenance,
   type AnalysisOutcome,
   type DiscoveryLedgerEntry,
   type PlaneAEvaluationDecision,
@@ -193,6 +194,7 @@ function isPlaneAFact(value: unknown): value is PlaneASidecarV1["factBatches"][n
       EdgeKindSchema.safeParse(value["kind"]).success
       && isNonEmptyString(value["from"])
       && isNonEmptyString(value["to"])
+      && (value["provenance"] === undefined || isEdgeProvenance(value["provenance"]))
     );
   }
   return false;
@@ -426,6 +428,7 @@ export function parsePlaneAIndexSnapshot(
       return undefined;
     }
     return {
+      ...value,
       schemaVersion: value["schemaVersion"], capturedAt: value["capturedAt"],
       repositoryGraphHash: value["repositoryGraphHash"], sidecarDigest: value["sidecarDigest"], workspaceDigest: value["workspaceDigest"],
       ...(value["unresolvedReferenceIndexHash"] !== undefined ? { unresolvedReferenceIndexHash: value["unresolvedReferenceIndexHash"] } : {}),
