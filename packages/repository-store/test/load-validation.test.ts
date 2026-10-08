@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SemctxError, type Claim, type ContextPack, type EvidenceRecord, type RepositoryGraph, type TaskFrame } from "@semantic-context/core";
+import { ClaimSchema, ContextPackSchema, RepositoryNodeSchema, SemctxError, TaskFrameSchema, type Claim, type ContextPack, type EvidenceRecord, type RepositoryGraph, type TaskFrame } from "@semantic-context/core";
 import { SqliteRepositoryReader, SqliteRepositoryStore } from "@semantic-context/repository-store";
 
 const graph: RepositoryGraph = {
@@ -86,6 +86,107 @@ const corruptions = [
 ] as const;
 
 describe("SQLite load validation", () => {
+  for (const field of ["tags", "evidence"] as const) {
+    it(`rejects masked invalid indexed node ${field} in public and context schemas`, () => {
+      const masked: unknown[] = [1];
+      Object.defineProperty(masked, Symbol.iterator, { value: function* () { yield field === "tags" ? "valid" : { filePath: "a.ts", sourceKind: "code" }; } });
+      const node = { ...graph.nodes[0]!, [field]: masked };
+      expect(RepositoryNodeSchema.safeParse(node).success).toBe(false);
+      expect(ContextPackSchema.safeParse({ ...pack, primaryNodes: [node] }).success).toBe(false);
+    });
+  }
+
+  it("accepts standard JSON node arrays and rejects sparse arrays", () => {
+    expect(RepositoryNodeSchema.safeParse(JSON.parse(JSON.stringify(graph.nodes[0]))).success).toBe(true);
+    for (const field of ["tags", "evidence"] as const) {
+      expect(RepositoryNodeSchema.safeParse({ ...graph.nodes[0], [field]: new Array(1) }).success).toBe(false);
+    }
+  });
+
+  it("rejects masked indexed values in task payload arrays", () => {
+    const capabilities: unknown[] = [1];
+    Object.defineProperty(capabilities, Symbol.iterator, { value: function* () { yield "valid"; } });
+    const invalidTask = { ...task, capabilities };
+    expect(TaskFrameSchema.safeParse(invalidTask).success).toBe(false);
+    expect(ContextPackSchema.safeParse({ ...pack, taskFrame: invalidTask }).success).toBe(false);
+  });
+
+  function ownProto<T extends object>(value: T): T {
+    return JSON.parse(`${JSON.stringify(value).slice(0, -1)},"__proto__":{"items":["original"]}}`) as T;
+  }
+
+  function protoPayload(): ContextPack {
+    return ownProto({
+      ...pack,
+      taskFrame: ownProto({ ...task, hypotheses: [ownProto({ id: "hypothesis:1", statement: "works", confidence: 1, evidenceIds: [], status: "supported" as const })] }),
+      hardConstraints: [ownProto(claim)],
+      impactPaths: [ownProto({ nodeIds: ["node:1"], edgeKinds: ["imports" as const], description: "path" })],
+      recommendedReads: [ownProto({ path: "a.ts", reason: "inspect", priority: "high" as const, evidenceIds: [] })],
+      verificationPlan: ownProto({ ...pack.verificationPlan, steps: [ownProto({ description: "inspect", kind: "manual_review" as const, targetNodeIds: [], evidenceIds: [] })] }),
+      meta: ownProto(pack.meta),
+    });
+  }
+
+  function expectOwnProto(value: object): void {
+    expect(Object.hasOwn(value, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(Reflect.get(value, "__proto__")).toEqual({ items: ["original"] });
+  }
+
+  it("preserves own __proto__ data through public payload schemas", () => {
+    const original = protoPayload();
+    expectOwnProto(TaskFrameSchema.parse(original.taskFrame));
+    expectOwnProto(ClaimSchema.parse(original.hardConstraints[0]));
+    const parsed = ContextPackSchema.parse(original);
+    for (const value of [parsed, parsed.taskFrame, parsed.taskFrame.hypotheses[0]!, parsed.hardConstraints[0]!, parsed.impactPaths[0]!, parsed.recommendedReads[0]!, parsed.verificationPlan, parsed.verificationPlan.steps[0]!, parsed.meta]) expectOwnProto(value);
+    expect(parsed).toEqual(original);
+  });
+
+  it("preserves own __proto__ data and independent reloads through SQLite payload readers", () => database((path) => {
+    const original = protoPayload();
+    const store = SqliteRepositoryStore.open(path);
+    try {
+      store.saveTaskFrame(original.taskFrame);
+      store.saveContextPack(original);
+      expectOwnProto(store.getTaskFrame(task.id)!);
+      expectOwnProto(store.listTaskFrames()[0]!);
+      const loaded = store.getContextPack(task.id)!;
+      for (const value of [loaded, loaded.taskFrame, loaded.taskFrame.hypotheses[0]!, loaded.hardConstraints[0]!, loaded.impactPaths[0]!, loaded.recommendedReads[0]!, loaded.verificationPlan, loaded.verificationPlan.steps[0]!, loaded.meta]) expectOwnProto(value);
+      (Reflect.get(loaded.meta, "__proto__") as { items: string[] }).items[0] = "modified";
+      expect(store.getContextPack(task.id)).toEqual(original);
+    } finally { store.close(); }
+    const reader = SqliteRepositoryReader.openExisting(path);
+    try { expectOwnProto(reader.getTaskFrame(task.id)!); } finally { reader.close(); }
+  }));
+
+  it("preserves JSON extensions throughout task and context payloads", () => database((path) => {
+    const extendedTask = {
+      ...task, extension: { owner: "consumer" },
+      hypotheses: [{ id: "hypothesis:1", statement: "works", confidence: 1, evidenceIds: [], status: "supported" as const, extension: ["hypothesis"] }],
+    };
+    const extendedClaim = { ...claim, extension: { policy: ["consumer"] } };
+    const extendedPack = {
+      ...pack, taskFrame: extendedTask, hardConstraints: [extendedClaim], extension: { version: 2 },
+      impactPaths: [{ nodeIds: ["node:1"], edgeKinds: ["imports" as const], description: "path", extension: true }],
+      recommendedReads: [{ path: "a.ts", reason: "inspect", priority: "high" as const, evidenceIds: [], extension: "read" }],
+      verificationPlan: {
+        ...pack.verificationPlan, extension: "plan",
+        steps: [{ description: "inspect", kind: "manual_review" as const, targetNodeIds: [], evidenceIds: [], extension: "step" }],
+      },
+      meta: { ...pack.meta, extension: "meta" },
+    };
+    const store = SqliteRepositoryStore.open(path);
+    try {
+      store.saveTaskFrame(extendedTask);
+      store.saveContextPack(extendedPack);
+      expect(store.getTaskFrame(task.id)).toEqual(extendedTask);
+      expect(store.listTaskFrames()).toEqual([extendedTask]);
+      expect(store.getContextPack(task.id)).toEqual(extendedPack);
+    } finally { store.close(); }
+    const reader = SqliteRepositoryReader.openExisting(path);
+    try { expect(reader.getTaskFrame(task.id)).toEqual(extendedTask); } finally { reader.close(); }
+  }));
+
   it("preserves valid JSON extension fields without changing object prototypes", () => database((path) => {
     const attached = JSON.parse('{"id":"evidence:extended","filePath":"a.ts","sourceKind":"code","extension":{"items":["original"]},"__proto__":"evidence-value"}') as EvidenceRecord;
     const metadata = JSON.parse('{"value":"original","__proto__":"metadata-value"}') as RepositoryGraph["nodes"][number]["metadata"];

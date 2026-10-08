@@ -15,8 +15,18 @@ export const ClaimKindSchema = z.enum(["contract", "invariant", "decision", "cap
 export const VerificationStatusSchema = z.enum(["unverified", "inferred", "documented", "tested", "statically_verified", "runtime_verified", "contradicted", "deprecated"]);
 export const QuestionKindSchema = z.enum(["public_api", "persistence", "business_rule", "runtime_behavior", "historical_reason", "style", "security"]);
 
-const StringArraySchema = z.array(z.string());
+const StringArraySchema = indexedArray(z.string());
 const UnitIntervalSchema = z.number().finite().min(0).max(1);
+// Array schemas validate original indexed values rather than a replaceable iterator.
+function indexedArray<T>(item: z.ZodType<T>): z.ZodType<T[]> {
+  return z.custom<T[]>((value) => arrayOf(value, (member): member is T => item.safeParse(member).success));
+}
+
+function nonTransforming<T>(shape: z.ZodType<T>): z.ZodType<T> {
+  // safeParse checks the complete known shape once; custom parsing returns the original data.
+  return z.custom<T>((value) => shape.safeParse(value).success);
+}
+
 // Canonical runtime checks for the persisted graph's non-transforming data format.
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -32,9 +42,11 @@ function optionalLine(value: unknown): value is number | undefined {
   return value === undefined || (typeof value === "number" && Number.isSafeInteger(value) && value > 0);
 }
 function arrayOf<T>(value: unknown, check: (item: unknown) => item is T): value is T[] {
-  if (!Array.isArray(value)) return false;
-  // A for-of loop visits sparse slots as undefined rather than silently skipping them.
-  for (const item of value) if (!check(item)) return false;
+  if (!Array.isArray(value) || value[Symbol.iterator] !== Array.prototype[Symbol.iterator]) return false;
+  // Validate the returned indexed values, rejecting sparse slots and overridden iteration.
+  for (let index = 0; index < value.length; index++) {
+    if (!Object.hasOwn(value, index) || !check(value[index])) return false;
+  }
   return true;
 }
 function string(value: unknown): value is string { return typeof value === "string"; }
@@ -86,50 +98,55 @@ export const OwnedRepositoryEdgeRowParser = {
     return repositoryEdge(value) ? value : RepositoryEdgeSchema.parse(value);
   },
 };
-export const RepositoryGraphSchema = z.object({ nodes: z.array(RepositoryNodeSchema), edges: z.array(RepositoryEdgeSchema) });
+export const RepositoryGraphSchema = z.object({ nodes: indexedArray(RepositoryNodeSchema), edges: indexedArray(RepositoryEdgeSchema) }).passthrough();
 
-export const ClaimSchema = z.object({
+// Persisted JSON payloads historically retained consumer extension fields at every level.
+// Validate known members without stripping those fields from returned task/context values.
+const ClaimShape = z.object({
   id: z.string().min(1), kind: ClaimKindSchema, statement: z.string(), subjectNodeIds: StringArraySchema, evidenceIds: StringArraySchema,
   authority: UnitIntervalSchema, freshness: UnitIntervalSchema, confidence: UnitIntervalSchema, verificationStatus: VerificationStatusSchema,
   validFrom: z.string().optional(), validUntil: z.string().optional(), tags: StringArraySchema,
-}) satisfies z.ZodType<Claim>;
+}).passthrough() satisfies z.ZodType<Claim>;
+export const ClaimSchema = nonTransforming<Claim>(ClaimShape);
 
-export const TaskFrameSchema = z.object({
+const TaskFrameShape = z.object({
   id: z.string(), rawTask: z.string(), mode: TaskModeSchema, capabilities: StringArraySchema,
   observedBehavior: StringArraySchema, expectedBehavior: StringArraySchema, boundedContexts: StringArraySchema,
   hardInvariants: StringArraySchema, softConstraints: StringArraySchema, acceptanceEvidence: StringArraySchema, nonGoals: StringArraySchema, riskSurfaces: StringArraySchema,
-  hypotheses: z.array(z.object({
+  hypotheses: indexedArray(z.object({
     id: z.string(), statement: z.string(), confidence: UnitIntervalSchema, evidenceIds: StringArraySchema,
     status: z.enum(["unverified", "supported", "rejected"]),
-  })),
+  }).passthrough()),
   createdAt: z.string(),
-}) satisfies z.ZodType<TaskFrame>;
+}).passthrough() satisfies z.ZodType<TaskFrame>;
+export const TaskFrameSchema = nonTransforming<TaskFrame>(TaskFrameShape);
 
-export const ContextPackSchema = z.object({
+const ContextPackShape = z.object({
   taskFrame: TaskFrameSchema,
-  hardConstraints: z.array(ClaimSchema), authoritativeClaims: z.array(ClaimSchema),
-  primaryNodes: z.array(RepositoryNodeSchema), secondaryNodes: z.array(RepositoryNodeSchema),
-  impactPaths: z.array(z.object({ nodeIds: StringArraySchema, edgeKinds: z.array(EdgeKindSchema), description: z.string() })),
-  relevantTests: z.array(RepositoryNodeSchema), contradictions: z.array(ClaimSchema), unknowns: StringArraySchema,
-  recommendedReads: z.array(z.object({
+  hardConstraints: indexedArray(ClaimSchema), authoritativeClaims: indexedArray(ClaimSchema),
+  primaryNodes: indexedArray(RepositoryNodeSchema), secondaryNodes: indexedArray(RepositoryNodeSchema),
+  impactPaths: indexedArray(z.object({ nodeIds: StringArraySchema, edgeKinds: indexedArray(EdgeKindSchema), description: z.string() }).passthrough()),
+  relevantTests: indexedArray(RepositoryNodeSchema), contradictions: indexedArray(ClaimSchema), unknowns: StringArraySchema,
+  recommendedReads: indexedArray(z.object({
     path: z.string(), reason: z.string(), priority: z.enum(["critical", "high", "medium"]), evidenceIds: StringArraySchema,
-  })),
+  }).passthrough()),
   verificationPlan: z.object({
-    steps: z.array(z.object({
+    steps: indexedArray(z.object({
       description: z.string(), kind: z.enum(["run_test", "static_check", "manual_review", "reproduce"]),
       command: z.string().optional(), targetNodeIds: StringArraySchema, evidenceIds: StringArraySchema,
-    })),
+    }).passthrough()),
     requiredTests: StringArraySchema, notes: StringArraySchema,
-  }),
-  generatedAt: z.string(), evidence: z.array(EvidenceRecordSchema),
-  priorityExplanations: z.array(z.object({
+  }).passthrough(),
+  generatedAt: z.string(), evidence: indexedArray(EvidenceRecordSchema),
+  priorityExplanations: indexedArray(z.object({
     targetId: z.string(), targetKind: z.enum(["node", "claim"]), score: z.number().finite(), eligible: z.boolean(),
     roleMatch: z.number().finite(), authority: z.number().finite(), graphReachability: z.number().finite(),
     verificationStrength: z.number().finite(), freshness: z.number().finite(), contradictionPenalty: z.number().finite(),
-    gates: z.array(z.object({ name: z.string(), passed: z.boolean(), reason: z.string() })), explanation: StringArraySchema,
-  })),
+    gates: indexedArray(z.object({ name: z.string(), passed: z.boolean(), reason: z.string() }).passthrough()), explanation: StringArraySchema,
+  }).passthrough()),
   meta: z.object({
     taskId: z.string(), questionKind: QuestionKindSchema, deterministic: z.boolean(), generator: z.string(),
     candidateProviders: StringArraySchema, warnings: StringArraySchema,
-  }),
-}) satisfies z.ZodType<ContextPack>;
+  }).passthrough(),
+}).passthrough() satisfies z.ZodType<ContextPack>;
+export const ContextPackSchema = nonTransforming<ContextPack>(ContextPackShape);
